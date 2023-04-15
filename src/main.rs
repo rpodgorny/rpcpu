@@ -1,7 +1,9 @@
 use anyhow::Result;
 
 const PREFIX: &str = "/sys/devices/system/cpu/cpufreq/policy0";
-const LVLS: [&str; 4] = ["fix", "min", "mid", "max"];
+const BAT_PREFIX: &str = "/sys/class/power_supply/BAT0";
+const LVLS: [&str; 5] = ["fix", "min", "mid", "max", "max+"];
+const SLEEP: u64 = 2;
 
 fn my_read_to_string<P>(p: P) -> Result<String>
 where
@@ -14,7 +16,7 @@ fn ensure_file_content<P>(p: P, v: &str) -> Result<()>
 where
     P: AsRef<std::path::Path>,
 {
-    let content = my_read_to_string(&p)?;
+    let content = my_read_to_string(&p).unwrap_or_default();
     if content != v {
         //let p_ = p.as_ref().to_str().unwrap();
         //log::debug!("{p_}: {content} -> {v}");
@@ -25,14 +27,19 @@ where
     Ok(())
 }
 
-fn cycle(fn_: &str) {
+fn cycle(fn_: &str) -> Result<()> {
     let cur = my_read_to_string(fn_).unwrap_or_else(|_| "max".to_string());
     let idx = LVLS.iter().position(|&x| x == cur).unwrap_or(0);
     let nxt = LVLS[(idx + 1) % LVLS.len()];
-    ensure_file_content(fn_, nxt).unwrap();
+    // TODO: setting the perms does not really help since /tmp is mounted with sticky flag
+    /*let mut perms = std::fs::metadata(fn_)?.permissions();
+    perms.set_readonly(false);
+    std::fs::set_permissions(fn_, perms)?;*/
+    ensure_file_content(fn_, nxt)?;
+    Ok(())
 }
 
-fn main() {
+fn main() -> Result<()> {
     simplelog::TermLogger::init(
         //simplelog::LevelFilter::Trace,
         //simplelog::LevelFilter::Info,
@@ -46,30 +53,47 @@ fn main() {
     log::info!("starting rpautovpn v{}", env!("CARGO_PKG_VERSION"));
 
     let state_fn = "/tmp/cpu_freq_crop";
-    if std::env::args().len() > 1 && std::env::args().nth(1).unwrap() == "toggle" {
-        cycle(state_fn);
-        return;
+    if let Some(cmd) = std::env::args().nth(1) {
+        return match cmd.as_str() {
+            "cycle" | "toggle" => cycle(state_fn),
+            _ => Err(anyhow::anyhow!("unknown command")),
+        }
     }
 
-    let freq_min = my_read_to_string(format!("{PREFIX}/cpuinfo_min_freq")).unwrap();
-    let freq_max = my_read_to_string(format!("{PREFIX}/cpuinfo_max_freq")).unwrap();
-    let freq_base = my_read_to_string(format!("{PREFIX}/base_frequency")).unwrap();
+    ensure_file_content(format!("{PREFIX}/scaling_governor"), "powersave")?;
+    // TODO: also: /sys/devices/system/cpu/cpu*/power/energy_perf_bias
+    // TODO: read possible values from /sys/devices/system/cpu/cpufreq/policy0/energy_performance_available_preferences
+    //ensure_file_content(format!("{PREFIX}/energy_performance_preference"), "balance_power")?;
+
+    let freq_min = my_read_to_string(format!("{PREFIX}/cpuinfo_min_freq"))?;
+    let freq_max = my_read_to_string(format!("{PREFIX}/cpuinfo_max_freq"))?;
+    let freq_base = my_read_to_string(format!("{PREFIX}/base_frequency"))?;
+
+    let mut bat_status_last = my_read_to_string(format!("{BAT_PREFIX}/status"))?;
+    let mut lvl_last = my_read_to_string(state_fn).unwrap_or_else(|_| "max".to_string());
     loop {
-        ensure_file_content(format!("{PREFIX}/scaling_governor"), "powersave").unwrap();
-        ensure_file_content(format!("{PREFIX}/energy_performance_preference"), "balance_power").unwrap(); // TODO: read possible values from /sys/devices/system/cpu/cpufreq/policy0/energy_performance_available_preferences
-        // TODO: also: /sys/devices/system/cpu/cpu*/power/energy_perf_bias
+        let bat_status = my_read_to_string(format!("{BAT_PREFIX}/status"))?;
+        if bat_status != bat_status_last && bat_status == "Charging" {
+            ensure_file_content(state_fn, "max+")?;
+            bat_status_last = bat_status;
+        }
         let lvl = my_read_to_string(state_fn).unwrap_or_else(|_| "max".to_string());
-        // TODO: unfinished shit
-        let (min_, max_, no_turbo) = match lvl.as_str() {
-            "fix" => (&freq_base, &freq_base, "0"),
-            "min" => (&freq_min, &freq_min, "1"),
-            "mid" => (&freq_min, &freq_base, "1"),
-            "max" => (&freq_min, &freq_max, "0"),
-            _ => todo!(),
-        };
-        ensure_file_content(format!("{PREFIX}/scaling_min_freq"), min_).unwrap();
-        ensure_file_content(format!("{PREFIX}/scaling_max_freq"), max_).unwrap();
-        ensure_file_content("/sys/devices/system/cpu/intel_pstate/no_turbo", no_turbo).unwrap();
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        if lvl != lvl_last {
+            let (min_, max_, no_turbo, perf_pref) = match lvl.as_str() {
+                "fix" => (&freq_base, &freq_base, "0", "balance_power"),
+                "min" => (&freq_min, &freq_min, "1", "balance_power"),
+                "mid" => (&freq_min, &freq_base, "1", "balance_power"),
+                "max" => (&freq_min, &freq_max, "0", "balance_power"),
+                "max+" => (&freq_min, &freq_max, "0", "performance"),
+                //_ => todo!(),
+                _ => unreachable!(),
+            };
+            ensure_file_content(format!("{PREFIX}/scaling_min_freq"), min_)?;
+            ensure_file_content(format!("{PREFIX}/scaling_max_freq"), max_)?;
+            ensure_file_content("/sys/devices/system/cpu/intel_pstate/no_turbo", no_turbo)?;
+            ensure_file_content(format!("{PREFIX}/energy_performance_preference"), perf_pref)?;
+            lvl_last = lvl;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(SLEEP));
     }
 }
