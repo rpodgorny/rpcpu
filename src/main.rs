@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 const PREFIX: &str = "/sys/devices/system/cpu/cpufreq/policy0";
-const BAT_PREFIX: &str = "/sys/class/power_supply/BAT0";
+const AC_FN: &str = "/sys/class/power_supply/AC0/online";
 const LVLS: [&str; 5] = ["fix", "min", "mid", "max", "max+"];
 const SLEEP: u64 = 2;
 
@@ -27,15 +27,20 @@ where
     Ok(())
 }
 
+fn make_writeable(fn_: &str) -> Result<()> {
+    // TODO: setting the perms does not really help since /tmp is mounted with sticky flag
+    let mut perms = std::fs::metadata(fn_)?.permissions();
+    perms.set_readonly(false);
+    std::fs::set_permissions(fn_, perms)?;
+    Ok(())
+}
+
 fn cycle(fn_: &str) -> Result<()> {
     let cur = my_read_to_string(fn_).unwrap_or_else(|_| "max".to_string());
     let idx = LVLS.iter().position(|&x| x == cur).unwrap_or(0);
     let nxt = LVLS[(idx + 1) % LVLS.len()];
-    // TODO: setting the perms does not really help since /tmp is mounted with sticky flag
-    /*let mut perms = std::fs::metadata(fn_)?.permissions();
-    perms.set_readonly(false);
-    std::fs::set_permissions(fn_, perms)?;*/
     ensure_file_content(fn_, nxt)?;
+    make_writeable(fn_)?;
     Ok(())
 }
 
@@ -52,12 +57,18 @@ fn main() -> Result<()> {
 
     log::info!("starting rpautovpn v{}", env!("CARGO_PKG_VERSION"));
 
-    let state_fn = "/tmp/cpu_freq_crop";
+    let state_dir = "/tmp/cpu_freq_crop";
+    let state_fn = format!("{state_dir}/state");
+    if !std::path::Path::new(state_dir).is_dir() {
+        std::fs::create_dir_all(state_dir)?;
+    }
+    make_writeable("/tmp/cpu_freq_crop")?;
     if let Some(cmd) = std::env::args().nth(1) {
-        return match cmd.as_str() {
-            "cycle" | "toggle" => cycle(state_fn),
+        let res = match cmd.as_str() {
+            "cycle" | "toggle" => cycle(&state_fn),
             _ => Err(anyhow::anyhow!("unknown command")),
-        }
+        };
+        return res;
     }
 
     ensure_file_content(format!("{PREFIX}/scaling_governor"), "powersave")?;
@@ -69,15 +80,20 @@ fn main() -> Result<()> {
     let freq_max = my_read_to_string(format!("{PREFIX}/cpuinfo_max_freq"))?;
     let freq_base = my_read_to_string(format!("{PREFIX}/base_frequency"))?;
 
-    let mut bat_status_last = my_read_to_string(format!("{BAT_PREFIX}/status"))?;
-    let mut lvl_last = my_read_to_string(state_fn).unwrap_or_else(|_| "max".to_string());
+    let mut ac_status_last = my_read_to_string(AC_FN)?;
+    let mut lvl_last = my_read_to_string(&state_fn).unwrap_or_else(|_| "max".to_string());
     loop {
-        let bat_status = my_read_to_string(format!("{BAT_PREFIX}/status"))?;
-        if bat_status != bat_status_last && bat_status == "Charging" {
-            ensure_file_content(state_fn, "max+")?;
-            bat_status_last = bat_status;
+        let ac_status = my_read_to_string(AC_FN)?;
+        if ac_status != ac_status_last {
+            if ac_status == "1" {
+                ensure_file_content(&state_fn, "max+")?;
+            } else {
+                ensure_file_content(&state_fn, "mid")?;
+            }
+            make_writeable(&state_fn)?;
+            ac_status_last = ac_status;
         }
-        let lvl = my_read_to_string(state_fn).unwrap_or_else(|_| "max".to_string());
+        let lvl = my_read_to_string(&state_fn).unwrap_or_else(|_| "max".to_string());
         if lvl != lvl_last {
             let (min_, max_, no_turbo, perf_pref) = match lvl.as_str() {
                 "fix" => (&freq_base, &freq_base, "0", "balance_power"),
