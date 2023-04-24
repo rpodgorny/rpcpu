@@ -86,7 +86,7 @@ fn main() -> Result<()> {
         let ac_status = my_read_to_string(AC_FN)?;
         if ac_status != ac_status_last {
             if ac_status == "1" {
-                ensure_file_content(&state_fn, "max+")?;
+                ensure_file_content(&state_fn, "max")?;
             } else {
                 ensure_file_content(&state_fn, "mid")?;
             }
