@@ -58,11 +58,11 @@ fn main() -> Result<()> {
     log::info!("starting rpautovpn v{}", env!("CARGO_PKG_VERSION"));
 
     let state_dir = "/tmp/cpu_freq_crop";
-    let state_fn = format!("{state_dir}/state");
     if !std::path::Path::new(state_dir).is_dir() {
         std::fs::create_dir_all(state_dir)?;
+        make_writeable("/tmp/cpu_freq_crop")?;
     }
-    make_writeable("/tmp/cpu_freq_crop")?;
+    let state_fn = format!("{state_dir}/state");
     if let Some(cmd) = std::env::args().nth(1) {
         let res = match cmd.as_str() {
             "cycle" | "toggle" => cycle(&state_fn),
