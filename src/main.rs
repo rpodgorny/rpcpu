@@ -4,7 +4,7 @@ const PREFIX: &str = "/sys/devices/system/cpu/cpufreq/policy0";
 const AC_FN: &str = "/sys/class/power_supply/AC0/online";
 const LVLS: [&str; 5] = ["fix", "min", "mid", "max", "max+"];
 const SLEEP: u64 = 2;
-const DEBOUNCE: u64 = 5;
+const DEBOUNCE: u64 = 6;
 
 fn my_read_to_string<P>(p: P) -> Result<String>
 where
@@ -99,6 +99,7 @@ fn main() -> Result<()> {
                 }
                 make_writeable(&state_fn)?;
                 ac_status_last = ac_status;
+                ac_change_t = None;
             }
         } else if ac_change_t.is_some() {
             log::info!("ac state back to previous value, probably just a fluke");
