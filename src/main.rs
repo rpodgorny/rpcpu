@@ -4,6 +4,7 @@ const PREFIX: &str = "/sys/devices/system/cpu/cpufreq/policy0";
 const AC_FN: &str = "/sys/class/power_supply/AC0/online";
 const LVLS: [&str; 5] = ["fix", "min", "mid", "max", "max+"];
 const SLEEP: u64 = 2;
+const DEBOUNCE: u64 = 5;
 
 fn my_read_to_string<P>(p: P) -> Result<String>
 where
@@ -81,17 +82,27 @@ fn main() -> Result<()> {
     let freq_base = my_read_to_string(format!("{PREFIX}/base_frequency"))?;
 
     let mut ac_status_last = my_read_to_string(AC_FN)?;
+    let mut ac_change_t: Option<std::time::Instant> = None;
     let mut lvl_last = my_read_to_string(&state_fn).unwrap_or_else(|_| "max".to_string());
     loop {
         let ac_status = my_read_to_string(AC_FN)?;
         if ac_status != ac_status_last {
-            if ac_status == "1" {
-                ensure_file_content(&state_fn, "max")?;
-            } else {
-                ensure_file_content(&state_fn, "mid")?;
+            if ac_change_t.is_none() {
+                log::info!("detected ac state change");
+                ac_change_t = Some(std::time::Instant::now());
+            } else if ac_change_t.unwrap().elapsed() > std::time::Duration::from_secs(DEBOUNCE) {
+                log::info!("ac state change debounced");
+                if ac_status == "1" {
+                    ensure_file_content(&state_fn, "max")?;
+                } else {
+                    ensure_file_content(&state_fn, "mid")?;
+                }
+                make_writeable(&state_fn)?;
+                ac_status_last = ac_status;
             }
-            make_writeable(&state_fn)?;
-            ac_status_last = ac_status;
+        } else if ac_change_t.is_some() {
+            log::info!("ac state back to previous value, probably just a fluke");
+            ac_change_t = None;
         }
         let lvl = my_read_to_string(&state_fn).unwrap_or_else(|_| "max".to_string());
         if lvl != lvl_last {
