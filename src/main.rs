@@ -3,6 +3,7 @@ use anyhow::Result;
 const PREFIX: &str = "/sys/devices/system/cpu/cpufreq/policy0";
 const AC_FN: &str = "/sys/class/power_supply/AC0/online";
 const LVLS: [&str; 5] = ["fix", "min", "mid", "max", "max+"];
+const LVL_DEFAULT: &str = "mid";
 const SLEEP: u64 = 2;
 const DEBOUNCE: u64 = 6;
 
@@ -59,11 +60,12 @@ fn main() -> Result<()> {
     log::info!("starting rpautovpn v{}", env!("CARGO_PKG_VERSION"));
 
     let state_dir = "/tmp/cpu_freq_crop";
+    let state_fn = format!("{state_dir}/state");
     if !std::path::Path::new(state_dir).is_dir() {
         std::fs::create_dir_all(state_dir)?;
         make_writeable("/tmp/cpu_freq_crop")?;
+        ensure_file_content(&state_fn, LVL_DEFAULT)?;
     }
-    let state_fn = format!("{state_dir}/state");
     if let Some(cmd) = std::env::args().nth(1) {
         let res = match cmd.as_str() {
             "cycle" | "toggle" => cycle(&state_fn),
