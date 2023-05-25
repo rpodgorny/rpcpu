@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-const PREFIX: &str = "/sys/devices/system/cpu/cpufreq/policy0";
+const PREFIX: &str = "/sys/devices/system/cpu/cpufreq/policy";
 const AC_FN: &str = "/sys/class/power_supply/AC0/online";
 const LVLS: [&str; 5] = ["fix", "min", "mid", "max", "max+"];
 const LVL_DEFAULT: &str = "mid";
@@ -75,14 +75,18 @@ fn main() -> Result<()> {
         return res;
     }
 
-    ensure_file_content(format!("{PREFIX}/scaling_governor"), "powersave")?;
+    let prefixes: Vec<_> = (0..99).map(|x| format!("{PREFIX}{x}")).filter(|x| std::path::Path::new(x).exists()).collect();
+
+    for prefix in &prefixes {
+        ensure_file_content(format!("{prefix}/scaling_governor"), "powersave")?;
+    }
     // TODO: also: /sys/devices/system/cpu/cpu*/power/energy_perf_bias
     // TODO: read possible values from /sys/devices/system/cpu/cpufreq/policy0/energy_performance_available_preferences
     //ensure_file_content(format!("{PREFIX}/energy_performance_preference"), "balance_power")?;
 
-    let freq_min = my_read_to_string(format!("{PREFIX}/cpuinfo_min_freq"))?;
-    let freq_max = my_read_to_string(format!("{PREFIX}/cpuinfo_max_freq"))?;
-    let freq_base = my_read_to_string(format!("{PREFIX}/base_frequency"))?;
+    let freq_min = my_read_to_string(format!("{PREFIX}0/cpuinfo_min_freq"))?;
+    let freq_max = my_read_to_string(format!("{PREFIX}0/cpuinfo_max_freq"))?;
+    let freq_base = my_read_to_string(format!("{PREFIX}0/base_frequency"))?;
 
     let mut ac_status_last = my_read_to_string(AC_FN)?;
     let mut ac_change_t: Option<std::time::Instant> = None;
@@ -119,10 +123,12 @@ fn main() -> Result<()> {
                 //_ => todo!(),
                 _ => unreachable!(),
             };
-            ensure_file_content(format!("{PREFIX}/scaling_min_freq"), min_)?;
-            ensure_file_content(format!("{PREFIX}/scaling_max_freq"), max_)?;
+            for prefix in &prefixes {
+                ensure_file_content(format!("{prefix}/scaling_min_freq"), min_)?;
+                ensure_file_content(format!("{prefix}/scaling_max_freq"), max_)?;
+                ensure_file_content(format!("{prefix}/energy_performance_preference"), perf_pref)?;
+            }
             ensure_file_content("/sys/devices/system/cpu/intel_pstate/no_turbo", no_turbo)?;
-            ensure_file_content(format!("{PREFIX}/energy_performance_preference"), perf_pref)?;
             lvl_last = lvl;
         }
         std::thread::sleep(std::time::Duration::from_secs(SLEEP));
