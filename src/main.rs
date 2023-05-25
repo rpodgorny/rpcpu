@@ -63,8 +63,9 @@ fn main() -> Result<()> {
     let state_fn = format!("{state_dir}/state");
     if !std::path::Path::new(state_dir).is_dir() {
         std::fs::create_dir_all(state_dir)?;
-        make_writeable("/tmp/cpu_freq_crop")?;
+        make_writeable(&state_dir)?;
         ensure_file_content(&state_fn, LVL_DEFAULT)?;
+        make_writeable(&state_fn)?;
     }
     if let Some(cmd) = std::env::args().nth(1) {
         let res = match cmd.as_str() {
