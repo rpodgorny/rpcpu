@@ -38,11 +38,11 @@ fn make_writeable(fn_: &str) -> Result<()> {
 }
 
 fn cycle(fn_: &str) -> Result<()> {
-    let cur = my_read_to_string(fn_).unwrap_or_else(|_| "max".to_string());
-    let idx = LVLS.iter().position(|&x| x == cur).unwrap_or(0);
-    let nxt = LVLS[(idx + 1) % LVLS.len()];
+    let nxt = my_read_to_string(fn_).map_or(LVL_DEFAULT, |cur| {
+        let idx = LVLS.iter().position(|&x| x == cur).unwrap_or(0);
+        LVLS[(idx + 1) % LVLS.len()]
+    });
     ensure_file_content(fn_, nxt)?;
-    make_writeable(fn_)?;
     Ok(())
 }
 
@@ -59,11 +59,15 @@ fn main() -> Result<()> {
 
     log::info!("starting rpautovpn v{}", env!("CARGO_PKG_VERSION"));
 
-    let state_dir = "/tmp/cpu_freq_crop";
-    let state_fn = format!("{state_dir}/state");
-    if !std::path::Path::new(state_dir).is_dir() {
+    let state_fn = "/tmp/cpu_freq_crop/state".to_string();
+    let state_dir = std::path::Path::new(&state_fn).parent().unwrap();
+    if !state_dir.is_dir() {
+        log::info!("will create directory {}", state_dir.display());
         std::fs::create_dir_all(state_dir)?;
-        make_writeable(&state_dir)?;
+        make_writeable(state_dir.to_str().unwrap())?;
+    }
+    if !std::path::Path::new(&state_fn).exists() {
+        log::info!("will create file {}", state_fn);
         ensure_file_content(&state_fn, LVL_DEFAULT)?;
         make_writeable(&state_fn)?;
     }
@@ -75,7 +79,10 @@ fn main() -> Result<()> {
         return res;
     }
 
-    let prefixes: Vec<_> = (0..99).map(|x| format!("{PREFIX}{x}")).filter(|x| std::path::Path::new(x).exists()).collect();
+    let prefixes: Vec<_> = (0..99)
+        .map(|x| format!("{PREFIX}{x}"))
+        .filter(|x| std::path::Path::new(x).exists())
+        .collect();
 
     for prefix in &prefixes {
         ensure_file_content(format!("{prefix}/scaling_governor"), "powersave")?;
@@ -90,7 +97,7 @@ fn main() -> Result<()> {
 
     let mut ac_status_last = my_read_to_string(AC_FN)?;
     let mut ac_change_t: Option<std::time::Instant> = None;
-    let mut lvl_last = my_read_to_string(&state_fn).unwrap_or_else(|_| "max".to_string());
+    let mut lvl_last = my_read_to_string(&state_fn).ok();
     loop {
         let ac_status = my_read_to_string(AC_FN)?;
         if ac_status != ac_status_last {
@@ -112,9 +119,10 @@ fn main() -> Result<()> {
             log::info!("ac state back to previous value, probably just a fluke");
             ac_change_t = None;
         }
-        let lvl = my_read_to_string(&state_fn).unwrap_or_else(|_| "max".to_string());
-        if lvl != lvl_last {
-            let (min_, max_, no_turbo, perf_pref) = match lvl.as_str() {
+        let lvl = my_read_to_string(&state_fn).ok();
+        if lvl != lvl_last && lvl.is_some() {
+            // TODO: get rid of the clone and unwrap if possible
+            let (min_, max_, no_turbo, perf_pref) = match lvl.clone().unwrap().as_str() {
                 "fix" => (&freq_base, &freq_base, "0", "balance_power"),
                 "min" => (&freq_min, &freq_min, "1", "balance_power"),
                 "mid" => (&freq_min, &freq_base, "1", "balance_power"),
@@ -129,8 +137,8 @@ fn main() -> Result<()> {
                 ensure_file_content(format!("{prefix}/energy_performance_preference"), perf_pref)?;
             }
             ensure_file_content("/sys/devices/system/cpu/intel_pstate/no_turbo", no_turbo)?;
-            lvl_last = lvl;
         }
+        lvl_last = lvl;
         std::thread::sleep(std::time::Duration::from_secs(SLEEP));
     }
 }
