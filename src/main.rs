@@ -96,8 +96,8 @@ fn main() -> Result<()> {
     let freq_base = my_read_to_string(format!("{PREFIX}0/base_frequency"))?;
 
     let mut ac_status_last = my_read_to_string(AC_FN)?;
-    let mut ac_change_t: Option<std::time::Instant> = None;
-    let mut lvl_last = my_read_to_string(&state_fn).ok();
+    let mut ac_change_t = None;
+    let mut lvl_last = None;
     loop {
         let ac_status = my_read_to_string(AC_FN)?;
         if ac_status != ac_status_last {
@@ -121,6 +121,7 @@ fn main() -> Result<()> {
         }
         let lvl = my_read_to_string(&state_fn).ok();
         if lvl != lvl_last && lvl.is_some() {
+            log::info!("level change from {:?} to {:?}", lvl_last, lvl);
             // TODO: get rid of the clone and unwrap if possible
             let (min_, max_, no_turbo, perf_pref) = match lvl.clone().unwrap().as_str() {
                 "fix" => (&freq_base, &freq_base, "0", "balance_power"),
