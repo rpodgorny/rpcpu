@@ -43,6 +43,9 @@ fn cycle(fn_: &str) -> Result<()> {
         LVLS[(idx + 1) % LVLS.len()]
     });
     ensure_file_content(fn_, nxt)?;
+    std::process::Command::new("/usr/bin/notify-send")
+        .args(["-t", "1000", nxt])
+        .status()?;
     Ok(())
 }
 
