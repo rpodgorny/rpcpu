@@ -44,6 +44,7 @@ fn cycle(fn_: &str) -> Result<()> {
     });
     ensure_file_content(fn_, nxt)?;
     std::process::Command::new("/usr/bin/notify-send")
+        .arg("--hint=string:x-canonical-private-synchronous:rpcpu")
         .args(["-t", "1000", nxt])
         .status()?;
     Ok(())
