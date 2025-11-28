@@ -61,9 +61,9 @@ fn main() -> Result<()> {
     )
     .unwrap();
 
-    log::info!("starting rpautovpn v{}", env!("CARGO_PKG_VERSION"));
+    log::info!("starting rpcpu v{}", env!("CARGO_PKG_VERSION"));
 
-    let state_fn = "/tmp/cpu_freq_crop/state".to_string();
+    let state_fn = "/run/rpcpu/state".to_string();
     let state_dir = std::path::Path::new(&state_fn).parent().unwrap();
     if !state_dir.is_dir() {
         log::info!("will create directory {}", state_dir.display());
