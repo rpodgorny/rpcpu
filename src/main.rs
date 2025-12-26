@@ -1,7 +1,6 @@
 use anyhow::Result;
 
 const PREFIX: &str = "/sys/devices/system/cpu/cpufreq/policy";
-const AC_FN: &str = "/sys/class/power_supply/AC0/online";
 const LVLS: [&str; 5] = ["fix", "min", "mid", "max", "max+"];
 const LVL_DEFAULT: &str = "mid";
 const SLEEP: u64 = 2;
@@ -58,10 +57,20 @@ fn main() -> Result<()> {
         simplelog::Config::default(),
         simplelog::TerminalMode::default(),
         simplelog::ColorChoice::Auto,
-    )
-    .unwrap();
+    )?;
 
     log::info!("starting rpcpu v{}", env!("CARGO_PKG_VERSION"));
+
+    // it's weird bug i see different paths on intel/amd systems
+    let ac_fn = [
+        "/sys/class/power_supply/AC/online",
+        "/sys/class/power_supply/AC0/online",
+    ]
+    .iter()
+    .find(|&x| std::fs::exists(x).is_ok())
+    .expect("failed to find a/c device file");
+
+    log::info!("using {ac_fn} for ac status");
 
     let state_fn = "/run/rpcpu/state".to_string();
     let state_dir = std::path::Path::new(&state_fn).parent().unwrap();
@@ -97,13 +106,17 @@ fn main() -> Result<()> {
 
     let freq_min = my_read_to_string(format!("{PREFIX}0/cpuinfo_min_freq"))?;
     let freq_max = my_read_to_string(format!("{PREFIX}0/cpuinfo_max_freq"))?;
-    let freq_base = my_read_to_string(format!("{PREFIX}0/base_frequency"))?;
+    let freq_base = my_read_to_string(format!("{PREFIX}0/base_frequency")).unwrap_or_else(|_| {
+        // TODO: find a way to detect proper base frequency
+        log::warn!("failed to detect cpu base frequency, using 2GHz");
+        "2000000".into()
+    });
 
-    let mut ac_status_last = my_read_to_string(AC_FN)?;
+    let mut ac_status_last = my_read_to_string(ac_fn)?;
     let mut ac_change_t = None;
     let mut lvl_last = None;
     loop {
-        let ac_status = my_read_to_string(AC_FN)?;
+        let ac_status = my_read_to_string(ac_fn)?;
         if ac_status != ac_status_last {
             if ac_change_t.is_none() {
                 log::info!("detected ac state change");
